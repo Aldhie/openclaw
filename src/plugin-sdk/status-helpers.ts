@@ -1,10 +1,10 @@
 import type { ChannelStatusAdapter } from "../channels/plugins/types.adapters.js";
 import type { ChannelAccountSnapshot } from "../channels/plugins/types.core.js";
-import type { ChannelStatusIssue } from "../channels/plugins/types.js";
-import type { OpenClawConfig } from "../config/config.js";
+import type { ChannelStatusIssue } from "../channels/plugins/types.public.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 export type { ChannelAccountSnapshot } from "../channels/plugins/types.core.js";
-export type { ChannelStatusIssue } from "../channels/plugins/types.js";
+export type { ChannelStatusIssue } from "../channels/plugins/types.public.js";
 export { isRecord } from "../channels/plugins/status-issues/shared.js";
 export {
   appendMatchMetadata,
@@ -62,6 +62,22 @@ type ConfigIssueAccount = {
   accountId?: string | null;
   configured?: boolean | null;
 } & Record<string, unknown>;
+
+function buildComputedAccountStatusAdapterBase<ResolvedAccount, Probe, Audit>(
+  options: Omit<ChannelStatusAdapter<ResolvedAccount, Probe, Audit>, "buildAccountSnapshot">,
+): Omit<ChannelStatusAdapter<ResolvedAccount, Probe, Audit>, "buildAccountSnapshot"> {
+  return {
+    defaultRuntime: options.defaultRuntime,
+    buildChannelSummary: options.buildChannelSummary,
+    probeAccount: options.probeAccount,
+    formatCapabilitiesProbe: options.formatCapabilitiesProbe,
+    auditAccount: options.auditAccount,
+    buildCapabilitiesDiagnostics: options.buildCapabilitiesDiagnostics,
+    logSelfId: options.logSelfId,
+    resolveAccountState: options.resolveAccountState,
+    collectStatusIssues: options.collectStatusIssues,
+  };
+}
 
 /** Create the baseline runtime snapshot shape used by channel/account status stores. */
 export function createDefaultChannelRuntimeState<T extends Record<string, unknown>>(
@@ -212,15 +228,7 @@ export function createComputedAccountStatusAdapter<
   },
 ): ChannelStatusAdapter<ResolvedAccount, Probe, Audit> {
   return {
-    defaultRuntime: options.defaultRuntime,
-    buildChannelSummary: options.buildChannelSummary,
-    probeAccount: options.probeAccount,
-    formatCapabilitiesProbe: options.formatCapabilitiesProbe,
-    auditAccount: options.auditAccount,
-    buildCapabilitiesDiagnostics: options.buildCapabilitiesDiagnostics,
-    logSelfId: options.logSelfId,
-    resolveAccountState: options.resolveAccountState,
-    collectStatusIssues: options.collectStatusIssues,
+    ...buildComputedAccountStatusAdapterBase(options),
     buildAccountSnapshot: (params) => {
       const typedParams = params as ComputedAccountStatusAdapterParams<
         ResolvedAccount,
@@ -254,15 +262,7 @@ export function createAsyncComputedAccountStatusAdapter<
   },
 ): ChannelStatusAdapter<ResolvedAccount, Probe, Audit> {
   return {
-    defaultRuntime: options.defaultRuntime,
-    buildChannelSummary: options.buildChannelSummary,
-    probeAccount: options.probeAccount,
-    formatCapabilitiesProbe: options.formatCapabilitiesProbe,
-    auditAccount: options.auditAccount,
-    buildCapabilitiesDiagnostics: options.buildCapabilitiesDiagnostics,
-    logSelfId: options.logSelfId,
-    resolveAccountState: options.resolveAccountState,
-    collectStatusIssues: options.collectStatusIssues,
+    ...buildComputedAccountStatusAdapterBase(options),
     buildAccountSnapshot: async (params) => {
       const typedParams = params as ComputedAccountStatusAdapterParams<
         ResolvedAccount,

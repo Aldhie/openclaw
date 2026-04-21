@@ -42,8 +42,18 @@ const ZERO_USAGE: Usage = {
   },
 };
 
+const CURRENT_TOKEN_USAGE_KEYS = [
+  "last",
+  "current",
+  "lastCall",
+  "lastCallUsage",
+  "lastTokenUsage",
+  "last_token_usage",
+] as const;
+
 export class CodexAppServerEventProjector {
   private readonly assistantTextByItem = new Map<string, string>();
+  private readonly assistantItemOrder: string[] = [];
   private readonly reasoningTextByItem = new Map<string, string>();
   private readonly planTextByItem = new Map<string, string>();
   private readonly activeItemIds = new Set<string>();
@@ -96,7 +106,7 @@ export class CodexAppServerEventProjector {
       case "item/autoApprovalReview/started":
       case "item/autoApprovalReview/completed":
         this.guardianReviewCount += 1;
-        this.params.onAgentEvent?.({
+        this.emitAgentEvent({
           stream: "codex_app_server.guardian",
           data: { method: notification.method },
         });
@@ -152,6 +162,7 @@ export class CodexAppServerEventProjector {
       (turnFailed ? (this.completedTurn?.error?.message ?? "codex app-server turn failed") : null);
     return {
       aborted: this.aborted || turnInterrupted,
+      externalAbort: false,
       timedOut: false,
       idleTimedOut: false,
       timedOutDuringCompaction: false,
@@ -210,9 +221,12 @@ export class CodexAppServerEventProjector {
       this.assistantStarted = true;
       await this.params.onAssistantMessageStart?.();
     }
+    this.rememberAssistantItem(itemId);
     const text = `${this.assistantTextByItem.get(itemId) ?? ""}${delta}`;
     this.assistantTextByItem.set(itemId, text);
-    await this.params.onPartialReply?.({ text });
+    // Codex app-server can emit multiple agentMessage items per turn, including
+    // intermediate coordination/progress prose. Keep those deltas internal until
+    // turn completion chooses the last assistant item as the user-visible reply.
   }
 
   private async handleReasoningDelta(params: JsonObject): Promise<void> {
@@ -265,7 +279,7 @@ export class CodexAppServerEventProjector {
     }
     if (item?.type === "contextCompaction" && itemId) {
       this.activeCompactionItemIds.add(itemId);
-      this.params.onAgentEvent?.({
+      this.emitAgentEvent({
         stream: "compaction",
         data: {
           phase: "start",
@@ -277,7 +291,7 @@ export class CodexAppServerEventProjector {
       });
     }
     this.emitStandardItemEvent({ phase: "start", item });
-    this.params.onAgentEvent?.({
+    this.emitAgentEvent({
       stream: "codex_app_server.item",
       data: { phase: "started", itemId, type: item?.type },
     });
@@ -291,6 +305,7 @@ export class CodexAppServerEventProjector {
       this.completedItemIds.add(itemId);
     }
     if (item?.type === "agentMessage" && typeof item.text === "string" && item.text) {
+      this.rememberAssistantItem(item.id);
       this.assistantTextByItem.set(item.id, item.text);
     }
     if (item?.type === "plan" && typeof item.text === "string" && item.text) {
@@ -300,7 +315,7 @@ export class CodexAppServerEventProjector {
     if (item?.type === "contextCompaction" && itemId) {
       this.activeCompactionItemIds.delete(itemId);
       this.completedCompactionCount += 1;
-      this.params.onAgentEvent?.({
+      this.emitAgentEvent({
         stream: "compaction",
         data: {
           phase: "end",
@@ -313,7 +328,7 @@ export class CodexAppServerEventProjector {
     }
     this.recordToolMeta(item);
     this.emitStandardItemEvent({ phase: "end", item });
-    this.params.onAgentEvent?.({
+    this.emitAgentEvent({
       stream: "codex_app_server.item",
       data: { phase: "completed", itemId, type: item?.type },
     });
@@ -321,16 +336,16 @@ export class CodexAppServerEventProjector {
 
   private handleTokenUsage(params: JsonObject): void {
     const tokenUsage = isJsonObject(params.tokenUsage) ? params.tokenUsage : undefined;
-    const total = tokenUsage && isJsonObject(tokenUsage.total) ? tokenUsage.total : undefined;
-    if (!total) {
+    const current =
+      (tokenUsage ? readFirstJsonObject(tokenUsage, CURRENT_TOKEN_USAGE_KEYS) : undefined) ??
+      readFirstJsonObject(params, CURRENT_TOKEN_USAGE_KEYS);
+    if (!current) {
       return;
     }
-    this.tokenUsage = normalizeUsage({
-      input: readNumber(total, "inputTokens"),
-      output: readNumber(total, "outputTokens"),
-      cacheRead: readNumber(total, "cachedInputTokens"),
-      total: readNumber(total, "totalTokens"),
-    });
+    const usage = normalizeCodexTokenUsage(current);
+    if (usage) {
+      this.tokenUsage = usage;
+    }
   }
 
   private async handleTurnCompleted(params: JsonObject): Promise<void> {
@@ -348,6 +363,7 @@ export class CodexAppServerEventProjector {
     }
     for (const item of turn.items ?? []) {
       if (item.type === "agentMessage" && typeof item.text === "string" && item.text) {
+        this.rememberAssistantItem(item.id);
         this.assistantTextByItem.set(item.id, item.text);
       }
       if (item.type === "plan" && typeof item.text === "string" && item.text) {
@@ -372,7 +388,7 @@ export class CodexAppServerEventProjector {
     if (!params.explanation && (!params.steps || params.steps.length === 0)) {
       return;
     }
-    this.params.onAgentEvent?.({
+    this.emitAgentEvent({
       stream: "plan",
       data: {
         phase: "update",
@@ -396,7 +412,7 @@ export class CodexAppServerEventProjector {
     if (!kind) {
       return;
     }
-    this.params.onAgentEvent?.({
+    this.emitAgentEvent({
       stream: "item",
       data: {
         itemId: item.id,
@@ -424,8 +440,40 @@ export class CodexAppServerEventProjector {
     });
   }
 
+  private emitAgentEvent(
+    event: Parameters<NonNullable<EmbeddedRunAttemptParams["onAgentEvent"]>>[0],
+  ): void {
+    try {
+      this.params.onAgentEvent?.(event);
+    } catch {
+      // Downstream event consumers must not corrupt the canonical Codex turn projection.
+    }
+  }
+
   private collectAssistantTexts(): string[] {
-    return [...this.assistantTextByItem.values()].filter((text) => text.trim().length > 0);
+    const finalText = this.resolveFinalAssistantText();
+    return finalText ? [finalText] : [];
+  }
+
+  private resolveFinalAssistantText(): string | undefined {
+    for (let i = this.assistantItemOrder.length - 1; i >= 0; i -= 1) {
+      const itemId = this.assistantItemOrder[i];
+      if (!itemId) {
+        continue;
+      }
+      const text = this.assistantTextByItem.get(itemId)?.trim();
+      if (text) {
+        return text;
+      }
+    }
+    return undefined;
+  }
+
+  private rememberAssistantItem(itemId: string): void {
+    if (!itemId || this.assistantItemOrder.includes(itemId)) {
+      return;
+    }
+    this.assistantItemOrder.push(itemId);
   }
 
   private createAssistantMessage(text: string): AssistantMessage {
@@ -493,6 +541,48 @@ function readNullableString(record: JsonObject, key: string): string | null | un
 function readNumber(record: JsonObject, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readFirstJsonObject(record: JsonObject, keys: readonly string[]): JsonObject | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (isJsonObject(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readNumberAlias(record: JsonObject, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const value = readNumber(record, key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeCodexTokenUsage(record: JsonObject): NormalizedUsage | undefined {
+  return normalizeUsage({
+    input: readNumberAlias(record, ["inputTokens", "input_tokens", "input", "promptTokens"]),
+    output: readNumberAlias(record, ["outputTokens", "output_tokens", "output"]),
+    cacheRead: readNumberAlias(record, [
+      "cachedInputTokens",
+      "cached_input_tokens",
+      "cacheRead",
+      "cache_read",
+      "cache_read_input_tokens",
+      "cached_tokens",
+    ]),
+    cacheWrite: readNumberAlias(record, [
+      "cacheWrite",
+      "cache_write",
+      "cacheCreationInputTokens",
+      "cache_creation_input_tokens",
+    ]),
+    total: readNumberAlias(record, ["totalTokens", "total_tokens", "total"]),
+  });
 }
 
 function splitPlanText(text: string): string[] {

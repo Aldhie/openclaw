@@ -10,8 +10,8 @@ import {
   resolveConfiguredModelRef,
 } from "../agents/model-selection.js";
 import { formatTokenK } from "../commands/models/shared.js";
-import type { OpenClawConfig } from "../config/config.js";
 import { resolveAgentModelPrimaryValue } from "../config/model-input.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { applyPrimaryModel } from "../plugins/provider-model-primary.js";
 import { resolveOwningPluginIdsForProvider } from "../plugins/providers.js";
 import type { ProviderPlugin } from "../plugins/types.js";
@@ -319,11 +319,12 @@ async function resolveProviderPluginSetupOptions(params: {
           workspaceDir: params.workspaceDir,
           env: params.env,
         });
-  return providerModelPickerOptions.map((entry) => ({
-    value: entry.value,
-    label: entry.label,
-    ...(entry.hint ? { hint: entry.hint } : {}),
-  }));
+  return providerModelPickerOptions.map((entry) =>
+    Object.assign(
+      { value: entry.value, label: entry.label },
+      entry.hint ? { hint: entry.hint } : {},
+    ),
+  );
 }
 
 async function maybeHandleProviderPluginSelection(params: {
@@ -426,7 +427,13 @@ export async function promptDefaultModel(
   const resolvedKey = modelKey(resolved.provider, resolved.model);
   const configuredKey = configuredRaw ? resolvedKey : "";
 
-  const catalog = await loadModelCatalog({ config: cfg, useCache: false });
+  const catalogProgress = params.prompter.progress("Loading available models");
+  let catalog: Awaited<ReturnType<typeof loadModelCatalog>>;
+  try {
+    catalog = await loadModelCatalog({ config: cfg, useCache: false });
+  } finally {
+    catalogProgress.stop();
+  }
   if (catalog.length === 0) {
     return promptManualModel({
       prompter: params.prompter,
@@ -531,6 +538,7 @@ export async function promptDefaultModel(
     message: params.message ?? "Default model",
     options,
     initialValue,
+    searchable: true,
   });
   const selectedValue = selection ?? "";
   if (selectedValue === KEEP_VALUE) {
@@ -602,7 +610,13 @@ export async function promptModelAllowlist(params: {
     ? initialSeeds.filter((key) => allowedKeySet.has(key))
     : initialSeeds;
 
-  const catalog = await loadModelCatalog({ config: cfg, useCache: false });
+  const allowlistProgress = params.prompter.progress("Loading available models");
+  let catalog: Awaited<ReturnType<typeof loadModelCatalog>>;
+  try {
+    catalog = await loadModelCatalog({ config: cfg, useCache: false });
+  } finally {
+    allowlistProgress.stop();
+  }
   if (catalog.length === 0 && allowedKeys.length === 0) {
     const raw = await params.prompter.text({
       message:

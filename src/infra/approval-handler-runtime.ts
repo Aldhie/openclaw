@@ -18,27 +18,25 @@ import type {
   ChannelApprovalNativeRuntimeAdapter,
   ChannelApprovalNativeRuntimeSpec,
 } from "./approval-handler-runtime-types.js";
-import type { ChannelApprovalNativePlannedTarget } from "./approval-native-delivery.js";
-import {
-  createChannelNativeApprovalRuntime,
-  type PreparedChannelNativeApprovalTarget,
-} from "./approval-native-runtime.js";
 import type {
-  ApprovalActionView,
-  ApprovalMetadataView,
-  ExpiredApprovalView,
-  PendingApprovalView,
-  ResolvedApprovalView,
-} from "./approval-view-model.js";
+  ChannelNativeApprovalDeliveryCallbacks,
+  ChannelNativeApprovalTransportSpec,
+} from "./approval-native-runtime-types.js";
+import { createChannelNativeApprovalRuntime } from "./approval-native-runtime.js";
 import {
   buildExpiredApprovalView,
   buildPendingApprovalView,
   buildResolvedApprovalView,
 } from "./approval-view-model.js";
 import type {
-  ExecApprovalChannelRuntime,
-  ExecApprovalChannelRuntimeEventKind,
-} from "./exec-approval-channel-runtime.js";
+  ApprovalActionView,
+  ApprovalMetadataView,
+  ExpiredApprovalView,
+  PendingApprovalView,
+  ResolvedApprovalView,
+} from "./approval-view-model.types.js";
+import type { ExecApprovalChannelRuntime } from "./exec-approval-channel-runtime.js";
+import type { ExecApprovalChannelRuntimeEventKind } from "./exec-approval-channel-runtime.types.js";
 
 export type {
   ApprovalActionView,
@@ -53,7 +51,7 @@ export type {
   PluginApprovalPendingView,
   PluginApprovalResolvedView,
   ResolvedApprovalView,
-} from "./approval-view-model.js";
+} from "./approval-view-model.types.js";
 export { resolveApprovalOverGateway };
 export {
   CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY,
@@ -339,24 +337,7 @@ export type ChannelApprovalHandlerTransportSpec<
   TPreparedTarget,
   TPendingContent,
   TRequest extends ApprovalRequest = ApprovalRequest,
-> = {
-  prepareTarget: (params: {
-    plannedTarget: ChannelApprovalNativePlannedTarget;
-    request: TRequest;
-    approvalKind: ChannelApprovalKind;
-    pendingContent: TPendingContent;
-  }) =>
-    | PreparedChannelNativeApprovalTarget<TPreparedTarget>
-    | null
-    | Promise<PreparedChannelNativeApprovalTarget<TPreparedTarget> | null>;
-  deliverTarget: (params: {
-    plannedTarget: ChannelApprovalNativePlannedTarget;
-    preparedTarget: TPreparedTarget;
-    request: TRequest;
-    approvalKind: ChannelApprovalKind;
-    pendingContent: TPendingContent;
-  }) => TPendingEntry | null | Promise<TPendingEntry | null>;
-};
+> = ChannelNativeApprovalTransportSpec<TPendingEntry, TPreparedTarget, TPendingContent, TRequest>;
 
 export type ChannelApprovalHandlerLifecycleSpec<
   TPendingEntry,
@@ -364,29 +345,12 @@ export type ChannelApprovalHandlerLifecycleSpec<
   TPendingContent,
   TRequest extends ApprovalRequest = ApprovalRequest,
   TResolved extends ApprovalResolved = ApprovalResolved,
-> = {
-  onDeliveryError?: (params: {
-    error: unknown;
-    plannedTarget: ChannelApprovalNativePlannedTarget;
-    request: TRequest;
-    approvalKind: ChannelApprovalKind;
-    pendingContent: TPendingContent;
-  }) => void;
-  onDuplicateSkipped?: (params: {
-    plannedTarget: ChannelApprovalNativePlannedTarget;
-    preparedTarget: PreparedChannelNativeApprovalTarget<TPreparedTarget>;
-    request: TRequest;
-    approvalKind: ChannelApprovalKind;
-    pendingContent: TPendingContent;
-  }) => void;
-  onDelivered?: (params: {
-    plannedTarget: ChannelApprovalNativePlannedTarget;
-    preparedTarget: PreparedChannelNativeApprovalTarget<TPreparedTarget>;
-    request: TRequest;
-    approvalKind: ChannelApprovalKind;
-    pendingContent: TPendingContent;
-    entry: TPendingEntry;
-  }) => void;
+> = ChannelNativeApprovalDeliveryCallbacks<
+  TPendingEntry,
+  TPreparedTarget,
+  TPendingContent,
+  TRequest
+> & {
   finalizeResolved: (params: {
     request: TRequest;
     resolved: TResolved;

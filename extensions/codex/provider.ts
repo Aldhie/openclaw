@@ -15,7 +15,6 @@ import {
   readCodexPluginConfig,
   resolveCodexAppServerRuntimeOptions,
 } from "./src/app-server/config.js";
-import { clearSharedCodexAppServerClient } from "./src/app-server/shared-client.js";
 
 const PROVIDER_ID = "codex";
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -28,6 +27,7 @@ type CodexModelLister = (options: {
   timeoutMs: number;
   limit?: number;
   startOptions?: CodexAppServerStartOptions;
+  sharedClient?: boolean;
 }) => Promise<CodexAppServerModelListResult>;
 
 type BuildCodexProviderOptions = {
@@ -89,7 +89,16 @@ export function buildCodexProvider(options: BuildCodexProviderOptions = {}): Pro
       source: "codex-app-server",
       mode: "token",
     }),
-    supportsXHighThinking: ({ modelId }) => isKnownXHighCodexModel(modelId),
+    resolveThinkingProfile: ({ modelId }) => ({
+      levels: [
+        { id: "off" },
+        { id: "minimal" },
+        { id: "low" },
+        { id: "medium" },
+        { id: "high" },
+        ...(isKnownXHighCodexModel(modelId) ? [{ id: "xhigh" as const }] : []),
+      ],
+    }),
     isModernModelRef: ({ modelId }) => isModernCodexModel(modelId),
   };
 }
@@ -102,15 +111,11 @@ export async function buildCodexProviderCatalog(
   const timeoutMs = normalizeTimeoutMs(config.discovery?.timeoutMs);
   let discovered: CodexAppServerModel[] = [];
   if (config.discovery?.enabled !== false && !shouldSkipLiveDiscovery(options.env)) {
-    try {
-      discovered = await listModelsBestEffort({
-        listModels: options.listModels ?? listCodexAppServerModels,
-        timeoutMs,
-        startOptions: appServer.start,
-      });
-    } finally {
-      clearSharedCodexAppServerClient();
-    }
+    discovered = await listModelsBestEffort({
+      listModels: options.listModels ?? listCodexAppServerModels,
+      timeoutMs,
+      startOptions: appServer.start,
+    });
   }
   const models = (discovered.length > 0 ? discovered : FALLBACK_CODEX_MODELS).map(
     codexModelToDefinition,
@@ -118,6 +123,7 @@ export async function buildCodexProviderCatalog(
   return {
     provider: {
       baseUrl: CODEX_BASE_URL,
+      apiKey: "codex-app-server",
       auth: "token",
       api: "openai-codex-responses",
       models,
@@ -180,6 +186,7 @@ async function listModelsBestEffort(params: {
       timeoutMs: params.timeoutMs,
       limit: 100,
       startOptions: params.startOptions,
+      sharedClient: false,
     });
     return result.models.filter((model) => !model.hidden);
   } catch {

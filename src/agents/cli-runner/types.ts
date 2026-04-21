@@ -1,10 +1,10 @@
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { ReplyOperation } from "../../auto-reply/reply/reply-run-registry.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
-import type { OpenClawConfig } from "../../config/config.js";
 import type { CliSessionBinding } from "../../config/sessions.js";
 import type { SessionSystemPromptReport } from "../../config/sessions/types.js";
 import type { CliBackendConfig } from "../../config/types.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import type { ResolvedCliBackend } from "../cli-backends.js";
 import type { SkillSnapshot } from "../skills.js";
@@ -54,6 +54,7 @@ export type CliReusableSession = {
 
 export type PreparedCliRunContext = {
   params: RunCliAgentParams;
+  effectiveAuthProfileId?: string;
   started: number;
   workspaceDir: string;
   backendResolved: ResolvedCliBackend;

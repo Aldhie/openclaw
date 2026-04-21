@@ -1,7 +1,9 @@
 import { loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
+import { formatErrorMessage } from "../infra/errors.js";
 import { ensureGlobalUndiciEnvProxyDispatcher } from "../infra/net/undici-global-dispatcher.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
+import type { OAuthPrompt } from "./provider-oauth-flow.js";
 import { createVpsAwareOAuthHandlers } from "./provider-oauth-flow.js";
 import {
   formatOpenAIOAuthTlsPreflightFix,
@@ -10,48 +12,111 @@ import {
 
 const manualInputPromptMessage = "Paste the authorization code (or full redirect URL):";
 const openAICodexOAuthOriginator = "openclaw";
-const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES = [
-  "openid",
-  "profile",
-  "email",
-  "offline_access",
-  "model.request",
-  "api.responses.write",
-] as const;
+const localManualFallbackDelayMs = 15_000;
+const localManualFallbackGraceMs = 1_000;
 
-function normalizeOpenAICodexAuthorizeUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim();
-  if (!trimmed) {
-    return rawUrl;
-  }
-  try {
-    const url = new URL(trimmed);
-    if (
-      !/(?:^|\.)openai\.com$/i.test(url.hostname) ||
-      !/\/oauth\/authorize\/?$/i.test(url.pathname)
-    ) {
-      return rawUrl;
-    }
+type OpenAICodexOAuthFailureCode = "callback_timeout" | "callback_validation_failed";
 
-    const existing = new Set(
-      (url.searchParams.get("scope") ?? "")
-        .split(/\s+/)
-        .map((scope) => scope.trim())
-        .filter(Boolean),
+function waitForDelayOrLoginSettle(params: {
+  delayMs: number;
+  waitForLoginToSettle: Promise<void>;
+}): Promise<"delay" | "settled"> {
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = (outcome: "delay" | "settled") => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timeoutHandle);
+      resolve(outcome);
+    };
+    const timeoutHandle = setTimeout(() => finish("delay"), params.delayMs);
+    params.waitForLoginToSettle.then(
+      () => finish("settled"),
+      () => finish("settled"),
     );
-    for (const scope of OPENAI_CODEX_OAUTH_REQUIRED_SCOPES) {
-      existing.add(scope);
-    }
-    url.searchParams.set("scope", Array.from(existing).join(" "));
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
+  });
 }
 
-export const __testing = {
-  normalizeOpenAICodexAuthorizeUrl,
-};
+function createNeverSettlingPromptResult(): Promise<string> {
+  return new Promise<string>(() => undefined);
+}
+
+function createOpenAICodexOAuthError(
+  code: OpenAICodexOAuthFailureCode,
+  message: string,
+  cause?: unknown,
+): Error & { code: OpenAICodexOAuthFailureCode } {
+  const error = new Error(`OpenAI Codex OAuth failed (${code}): ${message}`, { cause });
+  return Object.assign(error, { code });
+}
+
+function rewriteOpenAICodexOAuthError(error: unknown): Error {
+  const message = formatErrorMessage(error);
+  if (/state mismatch|missing authorization code/i.test(message)) {
+    return createOpenAICodexOAuthError("callback_validation_failed", message, error);
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
+function createManualCodeInputHandler(params: {
+  isRemote: boolean;
+  onPrompt: (prompt: OAuthPrompt) => Promise<string>;
+  runtime: RuntimeEnv;
+  spin: ReturnType<WizardPrompter["progress"]>;
+  waitForLoginToSettle: Promise<void>;
+  hasBrowserAuthStarted: () => boolean;
+}): (() => Promise<string>) | undefined {
+  if (params.isRemote) {
+    return async () =>
+      await params.onPrompt({
+        message: manualInputPromptMessage,
+      });
+  }
+
+  return async () => {
+    if (!params.hasBrowserAuthStarted()) {
+      params.spin.update(
+        "Local OAuth callback was unavailable. Paste the redirect URL to continue…",
+      );
+      params.runtime.log(
+        "OpenAI Codex OAuth local callback did not start; switching to manual entry immediately.",
+      );
+      return await params.onPrompt({
+        message: manualInputPromptMessage,
+      });
+    }
+
+    const outcome = await waitForDelayOrLoginSettle({
+      delayMs: localManualFallbackDelayMs,
+      waitForLoginToSettle: params.waitForLoginToSettle,
+    });
+    if (outcome === "settled") {
+      // markLoginSettled() runs in loginOpenAICodexOAuth's finally block, so
+      // reaching this branch means the outer login call has already completed.
+      // Return a never-settling promise to suppress an unnecessary manual
+      // prompt without feeding placeholder input back into the upstream flow.
+      return await createNeverSettlingPromptResult();
+    }
+
+    const settledDuringGraceWindow = await waitForDelayOrLoginSettle({
+      delayMs: localManualFallbackGraceMs,
+      waitForLoginToSettle: params.waitForLoginToSettle,
+    });
+    if (settledDuringGraceWindow === "settled") {
+      return await createNeverSettlingPromptResult();
+    }
+
+    params.spin.update("Browser callback did not finish. Paste the redirect URL to continue…");
+    params.runtime.log(
+      `OpenAI Codex OAuth callback did not arrive within ${localManualFallbackDelayMs}ms; switching to manual entry (callback_timeout).`,
+    );
+    return await params.onPrompt({
+      message: manualInputPromptMessage,
+    });
+  };
+}
 
 export async function loginOpenAICodexOAuth(params: {
   prompter: WizardPrompter;
@@ -62,16 +127,14 @@ export async function loginOpenAICodexOAuth(params: {
 }): Promise<OAuthCredentials | null> {
   const { prompter, runtime, isRemote, openUrl, localBrowserMessage } = params;
 
-  // Ensure env-based proxy dispatcher is active before any outbound fetch calls,
-  // including the TLS preflight check.
   ensureGlobalUndiciEnvProxyDispatcher();
 
   const preflight = await runOpenAIOAuthTlsPreflight();
   if (!preflight.ok && preflight.kind === "tls-cert") {
     const hint = formatOpenAIOAuthTlsPreflightFix(preflight);
-    runtime.error(hint);
     await prompter.note(hint, "OAuth prerequisites");
-    throw new Error(preflight.message);
+    runtime.error(hint);
+    throw new Error(`OpenAI Codex OAuth prerequisites failed: ${preflight.message}`);
   }
 
   await prompter.note(
@@ -90,6 +153,11 @@ export async function loginOpenAICodexOAuth(params: {
   );
 
   const spin = prompter.progress("Starting OAuth flow…");
+  let browserAuthStarted = false;
+  let markLoginSettled!: () => void;
+  const waitForLoginToSettle = new Promise<void>((resolve) => {
+    markLoginSettled = resolve;
+  });
   try {
     const { onAuth: baseOnAuth, onPrompt } = createVpsAwareOAuthHandlers({
       isRemote,
@@ -100,29 +168,34 @@ export async function loginOpenAICodexOAuth(params: {
       localBrowserMessage: localBrowserMessage ?? "Complete sign-in in browser…",
       manualPromptMessage: manualInputPromptMessage,
     });
+    const onAuth: typeof baseOnAuth = async (event) => {
+      browserAuthStarted = true;
+      await baseOnAuth(event);
+    };
 
     const creds = await loginOpenAICodex({
-      onAuth: async (event) =>
-        await baseOnAuth({
-          ...event,
-          url: normalizeOpenAICodexAuthorizeUrl(event.url),
-        }),
+      onAuth,
       onPrompt,
       originator: openAICodexOAuthOriginator,
-      onManualCodeInput: isRemote
-        ? async () =>
-            await onPrompt({
-              message: manualInputPromptMessage,
-            })
-        : undefined,
+      onManualCodeInput: createManualCodeInputHandler({
+        isRemote,
+        onPrompt,
+        runtime,
+        spin,
+        waitForLoginToSettle,
+        hasBrowserAuthStarted: () => browserAuthStarted,
+      }),
       onProgress: (msg: string) => spin.update(msg),
     });
     spin.stop("OpenAI OAuth complete");
     return creds ?? null;
   } catch (err) {
     spin.stop("OpenAI OAuth failed");
-    runtime.error(String(err));
+    const rewrittenError = rewriteOpenAICodexOAuthError(err);
+    runtime.error(String(rewrittenError));
     await prompter.note("Trouble with OAuth? See https://docs.openclaw.ai/start/faq", "OAuth help");
-    throw err;
+    throw rewrittenError;
+  } finally {
+    markLoginSettled();
   }
 }
