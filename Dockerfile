@@ -203,7 +203,7 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 # Build with: docker build --build-arg OPENCLAW_INSTALL_BROWSER=1 ...
 # Adds ~300MB but eliminates the 60-90s Playwright install on every container start.
 # Must run after node_modules COPY so playwright-core is available.
-ARG OPENCLAW_INSTALL_BROWSER=""
+ARG OPENCLAW_INSTALL_BROWSER=1
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
     if [ -n "$OPENCLAW_INSTALL_BROWSER" ]; then \
@@ -219,7 +219,7 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 # Build with: docker build --build-arg OPENCLAW_INSTALL_DOCKER_CLI=1 ...
 # Adds ~50MB. Only the CLI is installed — no Docker daemon.
 # Required for agents.defaults.sandbox to function in Docker deployments.
-ARG OPENCLAW_INSTALL_DOCKER_CLI=""
+ARG OPENCLAW_INSTALL_DOCKER_CLI=1
 ARG OPENCLAW_DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
@@ -245,6 +245,58 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         docker-ce-cli docker-compose-plugin; \
+    fi
+
+
+# ── Skill dependencies ───────────────────────────────────────────────────────
+# Pre-install development skill binaries so agents work without manual setup.
+# Build with: docker build --build-arg OPENCLAW_INSTALL_SKILL_DEPS=1 ...
+#
+# Skills covered:
+#   github / gh-issues  → gh (GitHub CLI)
+#   video-frames        → ffmpeg
+#   summarize           → yt-dlp + @steipete/summarize
+#   clawhub             → clawhub npm package
+#
+# Adds ~150MB to the image. Skills requiring API keys/tokens (coding-agent,
+# discord, slack, notion) are NOT included — configure those via openclaw.json
+# or environment variables at runtime.
+ARG OPENCLAW_INSTALL_SKILL_DEPS=1
+RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
+    if [ -n "$OPENCLAW_INSTALL_SKILL_DEPS" ]; then \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates gnupg && \
+      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        gh \
+        ffmpeg \
+        python3-pip \
+        sqlite3 \
+        postgresql-client \
+        default-mysql-client \
+        netcat-openbsd \
+        redis-tools \
+        python3-full \
+        python3-venv \
+        dnsutils \
+        tcpdump \
+        socat && \
+      pip3 install yt-dlp httpie nano-pdf --break-system-packages && \
+      npm install -g --no-fund --no-audit mcporter && \
+      npm install -g clawhub && \
+      chmod +x /usr/local/lib/node_modules/clawhub/bin/clawdhub.js 2>/dev/null || true && \
+      npm install -g @steipete/summarize && \
+      curl -fsSL https://github.com/bcicen/ctop/releases/download/v0.7.7/ctop-0.7.7-linux-amd64 \
+        -o /usr/local/bin/ctop && \
+      chmod +x /usr/local/bin/ctop && \
+      mkdir -p /home/node/.config/httpie /home/node/.config/gh && \
+      chown -R node:node /home/node/.config; \
     fi
 
 # Expose the CLI binary without requiring npm global writes as non-root.
