@@ -6,7 +6,7 @@ import {
   formatChannelAllowFrom,
 } from "../../channels/account-summary.js";
 import { resolveChannelDefaultAccountId } from "../../channels/plugins/helpers.js";
-import { listChannelPlugins } from "../../channels/plugins/index.js";
+import { listReadOnlyChannelPluginsForConfig } from "../../channels/plugins/read-only.js";
 import { formatChannelStatusState } from "../../channels/plugins/status-state.js";
 import type {
   ChannelAccountSnapshot,
@@ -188,7 +188,11 @@ function collectMissingPaths(accounts: ChannelAccountRow[]): string[] {
 // Keep this generic: channel-specific rules belong in the channel plugin.
 export async function buildChannelsTable(
   cfg: OpenClawConfig,
-  opts?: { showSecrets?: boolean; sourceConfig?: OpenClawConfig },
+  opts?: {
+    showSecrets?: boolean;
+    sourceConfig?: OpenClawConfig;
+    includeSetupRuntimeFallback?: boolean;
+  },
 ): Promise<{
   rows: ChannelRow[];
   details: Array<{
@@ -205,7 +209,12 @@ export async function buildChannelsTable(
     rows: Array<Record<string, string>>;
   }> = [];
 
-  for (const plugin of listChannelPlugins()) {
+  const sourceConfig = opts?.sourceConfig ?? cfg;
+  const includeSetupRuntimeFallback = opts?.includeSetupRuntimeFallback ?? true;
+  for (const plugin of listReadOnlyChannelPluginsForConfig(cfg, {
+    activationSourceConfig: sourceConfig,
+    includeSetupRuntimeFallback,
+  })) {
     const accountIds = plugin.config.listAccountIds(cfg);
     const defaultAccountId = resolveChannelDefaultAccountId({
       plugin,
@@ -215,7 +224,6 @@ export async function buildChannelsTable(
     const resolvedAccountIds = accountIds.length > 0 ? accountIds : [defaultAccountId];
 
     const accounts: ChannelAccountRow[] = [];
-    const sourceConfig = opts?.sourceConfig ?? cfg;
     for (const accountId of resolvedAccountIds) {
       accounts.push(
         await resolveChannelAccountRow({

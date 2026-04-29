@@ -82,6 +82,7 @@ const ChannelStreamingBlockSchema = z
 const ChannelStreamingPreviewSchema = z
   .object({
     chunk: BlockStreamingChunkSchema.optional(),
+    toolProgress: z.boolean().optional(),
   })
   .strict();
 const ChannelPreviewStreamingConfigSchema = z
@@ -438,6 +439,12 @@ export const DiscordDmSchema = z
   })
   .strict();
 
+export const DiscordThreadSchema = z
+  .object({
+    inheritParent: z.boolean().optional(),
+  })
+  .strict();
+
 export const DiscordGuildChannelSchema = z
   .object({
     requireMention: z.boolean().optional(),
@@ -502,6 +509,7 @@ const DiscordVoiceAutoJoinSchema = z
 const DiscordVoiceSchema = z
   .object({
     enabled: z.boolean().optional(),
+    model: z.string().min(1).optional(),
     autoJoin: z.array(DiscordVoiceAutoJoinSchema).optional(),
     daveEncryption: z.boolean().optional(),
     decryptionFailureTolerance: z.number().int().min(0).optional(),
@@ -520,6 +528,7 @@ export const DiscordAccountSchema = z
     configWrites: z.boolean().optional(),
     token: SecretInputSchema.optional().register(sensitive),
     proxy: z.string().optional(),
+    gatewayInfoTimeoutMs: z.number().int().positive().max(120_000).optional(),
     allowBots: z.union([z.boolean(), z.literal("mentions")]).optional(),
     dangerouslyAllowNameMatching: z.boolean().optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
@@ -557,6 +566,7 @@ export const DiscordAccountSchema = z
       .strict()
       .optional(),
     replyToMode: ReplyToModeSchema.optional(),
+    thread: DiscordThreadSchema.optional(),
     // Aliases for channels.discord.dm.policy / channels.discord.dm.allowFrom. Prefer these for
     // inheritance in multi-account setups (shallow merge works; nested dm object doesn't).
     dmPolicy: DmPolicySchema.optional(),
@@ -604,6 +614,7 @@ export const DiscordAccountSchema = z
       .object({
         presence: z.boolean().optional(),
         guildMembers: z.boolean().optional(),
+        voiceStates: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -886,10 +897,19 @@ const SlackReplyToModeByChatTypeSchema = z
   })
   .strict();
 
+export const SlackSocketModeSchema = z
+  .object({
+    clientPingTimeout: z.number().int().positive().optional(),
+    serverPingTimeout: z.number().int().positive().optional(),
+    pingPongLoggingEnabled: z.boolean().optional(),
+  })
+  .strict();
+
 export const SlackAccountSchema = z
   .object({
     name: z.string().optional(),
     mode: z.enum(["socket", "http"]).optional(),
+    socketMode: SlackSocketModeSchema.optional(),
     signingSecret: SecretInputSchema.optional().register(sensitive),
     webhookPath: z.string().optional(),
     capabilities: SlackCapabilitiesSchema.optional(),

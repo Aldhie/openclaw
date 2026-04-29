@@ -26,6 +26,9 @@ export type ThinkingCatalogEntry = {
   provider: string;
   id: string;
   reasoning?: boolean;
+  compat?: {
+    supportedReasoningEfforts?: readonly string[] | null;
+  } | null;
 };
 
 export const BASE_THINKING_LEVELS: ThinkLevel[] = ["off", "minimal", "low", "medium", "high"];
@@ -35,7 +38,7 @@ export const THINKING_LEVEL_RANKS: Record<ThinkLevel, number> = {
   low: 20,
   medium: 30,
   high: 40,
-  adaptive: 50,
+  adaptive: 30,
   xhigh: 60,
   max: 70,
 };

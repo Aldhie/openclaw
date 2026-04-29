@@ -444,6 +444,44 @@ describe("google transport stream", () => {
     });
   });
 
+  it("keeps adaptive Gemini 3 thinking on provider dynamic defaults", () => {
+    const params = buildGoogleGenerativeAiParams(
+      buildGeminiModel({ id: "gemini-3-flash-preview" }),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+      } as never,
+      {
+        reasoning: "adaptive",
+      } as never,
+    );
+
+    expect(params.generationConfig).toMatchObject({
+      thinkingConfig: { includeThoughts: true },
+    });
+    expect(params.generationConfig).not.toMatchObject({
+      thinkingConfig: { thinkingLevel: expect.any(String) },
+    });
+    expect(params.generationConfig).not.toMatchObject({
+      thinkingConfig: { thinkingBudget: expect.any(Number) },
+    });
+  });
+
+  it("maps adaptive Gemini 2.5 thinking to dynamic thinkingBudget", () => {
+    const params = buildGoogleGenerativeAiParams(
+      buildGeminiModel({ id: "gemini-2.5-flash" }),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+      } as never,
+      {
+        reasoning: "adaptive",
+      } as never,
+    );
+
+    expect(params.generationConfig).toMatchObject({
+      thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+    });
+  });
+
   it("normalizes explicit Gemini 3 Pro thinking levels", () => {
     const params = buildGoogleGenerativeAiParams(
       buildGeminiModel({ id: "gemini-3.1-pro-preview" }),
@@ -475,5 +513,55 @@ describe("google transport stream", () => {
     );
 
     expect(params.cachedContent).toBe("cachedContents/prebuilt-context");
+  });
+
+  it("uses a non-empty text placeholder for empty user text", () => {
+    const params = buildGoogleGenerativeAiParams(buildGeminiModel(), {
+      messages: [
+        { role: "user", content: "", timestamp: 0 },
+        {
+          role: "user",
+          content: [{ type: "text", text: "" }],
+          timestamp: 1,
+        },
+      ],
+    } as never);
+
+    expect(params.contents).toEqual([
+      { role: "user", parts: [{ text: " " }] },
+      { role: "user", parts: [{ text: " " }] },
+    ]);
+  });
+
+  it("uses a text placeholder when user parts are filtered out for text-only models", () => {
+    const params = buildGoogleGenerativeAiParams(buildGeminiModel({ input: ["text"] }), {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image", mimeType: "image/png", data: "png-bytes" }],
+          timestamp: 0,
+        },
+      ],
+    } as never);
+
+    expect(params.contents).toEqual([{ role: "user", parts: [{ text: " " }] }]);
+  });
+
+  it("uses a user placeholder when converted Gemini contents would otherwise be empty", () => {
+    const params = buildGoogleGenerativeAiParams(buildGeminiModel(), {
+      messages: [
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-2.5-pro",
+          stopReason: "stop",
+          timestamp: 0,
+          content: [{ type: "text", text: "   " }],
+        },
+      ],
+    } as never);
+
+    expect(params.contents).toEqual([{ role: "user", parts: [{ text: " " }] }]);
   });
 });

@@ -110,6 +110,14 @@ export const tr: TranslationMap = {
       lightningHelp: "Bahşişler için Lightning adresi (LUD-16)",
     },
   },
+  lazyView: {
+    loadingTitle: "Panel yükleniyor",
+    errorTitle: "Panel yüklenemedi",
+    errorSubtitle:
+      "En son Control UI paketini yüklemek için sayfayı yeniden yükleyin veya ağ isteği başarısız olduysa tekrar deneyin.",
+    retry: "Tekrar dene",
+    unknownError: "Bilinmeyen modül yükleme hatası.",
+  },
   nodes: {
     binding: {
       loadConfigHint: "Bağlamaları düzenlemek için yapılandırmayı yükleyin.",
@@ -279,6 +287,8 @@ export const tr: TranslationMap = {
       tailscaleDocsLink: "Belgeler: Tailscale Serve",
       insecureHttpDocsTitle: "Güvenli olmayan HTTP belgeleri (yeni sekmede açılır)",
       insecureHttpDocsLink: "Belgeler: Güvenli olmayan HTTP",
+      copyCommand: "Komutu kopyala",
+      copyCommandAria: "Komutu kopyala: {command}",
     },
     cards: {
       cost: "Maliyet",
@@ -315,6 +325,30 @@ export const tr: TranslationMap = {
     palette: {
       placeholder: "Bir komut yazın…",
       noResults: "Sonuç yok",
+      categories: {
+        search: "Arama",
+        navigation: "Navigation",
+        skills: "Skills",
+      },
+      items: {
+        overview: "Genel Bakış",
+        sessions: "Oturumlar",
+        scheduled: "Zamanlanmış",
+        skills: "Skills",
+        settings: "Ayarlar",
+        agents: "Ajanlar",
+        shellCommand: "Shell Komutu",
+        debugMode: "Hata Ayıklama Modu",
+      },
+      descriptions: {
+        shellCommand: "Shell çalıştır",
+        debugMode: "Hata ayıklamayı değiştir",
+      },
+      footer: {
+        navigate: "gezin",
+        select: "seç",
+        close: "kapat",
+      },
     },
   },
   dreaming: {
@@ -328,6 +362,15 @@ export const tr: TranslationMap = {
       refreshing: "Yenileniyor…",
       on: "Dreaming Açık",
       off: "Dreaming Kapalı",
+    },
+    restartConfirmation: {
+      title: "Restart Gateway to Apply Change",
+      subtitle: "Changing Dreaming mode restarts the gateway.",
+      warning:
+        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
+      confirm: "Confirm Restart",
+      restarting: "Restarting…",
+      failed: "Could not apply change. Check your connection and try again.",
     },
     status: {
       active: "Dreaming Etkin",
@@ -678,10 +721,16 @@ export const tr: TranslationMap = {
     jaJP: "日本語 (Japonca)",
     ko: "한국어 (Korece)",
     fr: "Français (Fransızca)",
+    ar: "العربية (Arapça)",
+    it: "Italiano (İtalyanca)",
     tr: "Türkçe (Türkçe)",
     uk: "Українська (Ukraynaca)",
     id: "Bahasa Indonesia (Endonezce)",
     pl: "Polski (Lehçe)",
+    th: "ไทย (Tayca)",
+    vi: "Tiếng Việt (Vietnamca)",
+    nl: "Nederlands (Felemenkçe)",
+    fa: "فارسی (Farsça)",
   },
   cron: {
     summary: {
@@ -887,7 +936,7 @@ export const tr: TranslationMap = {
       agentMessageRequired: "Aracı mesajı gerekli.",
       timeoutInvalid: "Ayarlanırsa zaman aşımı 0 saniyeden büyük olmalıdır.",
       webhookUrlRequired: "Webhook URL gerekli.",
-      webhookUrlInvalid: "Webhook URL http:// veya https:// ile başlamalıdır.",
+      webhookUrlInvalid: "Webhook URL http:// veya https:// ile ba��lamalıdır.",
       invalidRunTime: "Geçersiz çalıştırma zamanı.",
       invalidIntervalAmount: "Geçersiz aralık miktarı.",
       cronExprRequiredShort: "Cron ifadesi gerekli.",
